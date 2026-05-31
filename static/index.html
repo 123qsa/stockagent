@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>股票公告分析师</title>
+    <link rel="stylesheet" href="style.css">
+    <!-- Markdown 渲染 -->
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <!-- 代码高亮 -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+</head>
+<body>
+    <div id="app">
+        <!-- 左侧边栏 -->
+        <aside class="sidebar" id="sidebar">
+            <div class="sidebar-header">
+                <h2>📊 股票公告分析师</h2>
+                <button class="new-chat-btn" onclick="startNewChat()">+ 新对话</button>
+            </div>
+
+            <div class="sidebar-search">
+                <input type="text" id="stockSearch" placeholder="搜索股票代码/名称..." oninput="filterStocks()">
+            </div>
+
+            <div class="stock-list" id="stockList">
+                <!-- 股票列表由 JS 填充 -->
+            </div>
+
+            <div class="announcement-section" id="announcementSection" style="display:none;">
+                <div class="section-title">
+                    <span id="selectedStockName">--</span>
+                    <button class="close-section" onclick="closeAnnouncementSection()">×</button>
+                </div>
+                <div class="announcement-list" id="announcementList">
+                    <!-- 公告列表由 JS 填充 -->
+                </div>
+            </div>
+        </aside>
+
+        <!-- 主聊天区域 -->
+        <main class="chat-container">
+            <!-- 顶部工具栏 -->
+            <header class="chat-header">
+                <button class="sidebar-toggle" onclick="toggleSidebar()">☰</button>
+                <div class="header-info">
+                    <span id="headerStock">未选择股票</span>
+                    <span id="headerAnn" class="header-ann"></span>
+                </div>
+                <div class="analysis-type-selector">
+                    <select id="analysisType" onchange="onAnalysisTypeChange()">
+                        <option value="summary">摘要总结</option>
+                        <option value="key_info">关键信息</option>
+                        <option value="risk">风险判断</option>
+                        <option value="impact">业务影响</option>
+                    </select>
+                </div>
+            </header>
+
+            <!-- 消息区域 -->
+            <div class="messages-area" id="messagesArea">
+                <div class="welcome-screen" id="welcomeScreen">
+                    <div class="welcome-content">
+                        <h1>股票公告智能分析</h1>
+                        <p>选择左侧股票和公告，开始与 AI 分析师对话</p>
+                        <div class="quick-actions">
+                            <div class="quick-card" onclick="quickAsk('这份公告的核心内容是什么？')">
+                                <span>📋</span> 摘要这份公告
+                            </div>
+                            <div class="quick-card" onclick="quickAsk('这份公告对股价有什么影响？')">
+                                <span>📈</span> 分析股价影响
+                            </div>
+                            <div class="quick-card" onclick="quickAsk('公告中提到了哪些关键财务数据？')">
+                                <span>💰</span> 提取财务数据
+                            </div>
+                            <div class="quick-card" onclick="quickAsk('这份公告有哪些潜在风险？')">
+                                <span>⚠️</span> 识别风险点
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 输入区域 -->
+            <div class="input-area">
+                <div class="input-context" id="inputContext"></div>
+                <div class="input-box">
+                    <textarea
+                        id="messageInput"
+                        placeholder="输入你的问题..."
+                        rows="1"
+                        onkeydown="handleKeydown(event)"
+                        oninput="autoResize(this)"
+                    ></textarea>
+                    <button class="send-btn" id="sendBtn" onclick="sendMessage()">
+                        <svg viewBox="0 0 24 24" width="20" height="20">
+                            <path fill="currentColor" d="M2 12l19-9-9 19-2-8-8-2z"/>
+                        </svg>
+                    </button>
+                </div>
+                <div class="input-hint">Enter 发送，Shift+Enter 换行</div>
+            </div>
+        </main>
+    </div>
+
+    <!-- 加载动画 -->
+    <div class="loading-overlay" id="loadingOverlay" style="display:none;">
+        <div class="spinner"></div>
+        <p>AI 思考中...</p>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
