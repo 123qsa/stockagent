@@ -41,6 +41,10 @@ LLM_TEMPERATURE = float(os.getenv("DEEPSEEK_TEMPERATURE", "0.3"))
 # 单条公告最大分析字符数（防止超长）
 LLM_MAX_TEXT_LENGTH = int(os.getenv("DEEPSEEK_MAX_TEXT_LENGTH", "12000"))
 
+# RAG 模块配置（可选，需部署 RAGFlow 服务）
+RAGFLOW_API_KEY = os.getenv("RAGFLOW_API_KEY", "")
+RAGFLOW_BASE_URL = os.getenv("RAGFLOW_BASE_URL", "http://localhost:9380")
+
 
 
 # 确保目录存在
