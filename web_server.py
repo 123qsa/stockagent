@@ -266,6 +266,99 @@ def api_chat_v2():
         return jsonify({"error": str(e)}), 500
 
 
+@app.route("/api/ragflow/chat", methods=["POST"])
+def api_ragflow_chat():
+    """通过 RAGFlow 进行跨公告问答（需先部署 RAGFlow 服务并同步数据）
+
+    Request:
+    {
+        "stock_code": "000001",
+        "message": "2024年净利润是多少",
+        "history": [...]
+    }
+    """
+    data = request.get_json() or {}
+    stock_code = data.get("stock_code", "").strip()
+    message = data.get("message", "").strip()
+
+    if not stock_code:
+        return jsonify({"error": "股票代码不能为空"}), 400
+    if not message:
+        return jsonify({"error": "消息不能为空"}), 400
+
+    try:
+        from rag import RAGFlowAdapter, check_ragflow_available
+
+        if not check_ragflow_available():
+            return jsonify({
+                "error": "RAGFlow 服务未就绪",
+                "hint": "请先部署 RAGFlow 服务并同步公告数据",
+            }), 503
+
+        adapter = RAGFlowAdapter()
+        answer = adapter.chat(stock_code, message)
+
+        return jsonify({
+            "content": answer,
+            "stock_code": stock_code,
+            "source": "ragflow",
+        })
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/ragflow/retrieve", methods=["POST"])
+def api_ragflow_retrieve():
+    """通过 RAGFlow 检索公告片段（用于展示引用来源）
+
+    Request:
+    {
+        "stock_code": "000001",
+        "question": "2024年净利润",
+        "top_k": 5
+    }
+    """
+    data = request.get_json() or {}
+    stock_code = data.get("stock_code", "").strip()
+    question = data.get("question", "").strip()
+    top_k = data.get("top_k", 5)
+
+    if not stock_code or not question:
+        return jsonify({"error": "股票代码和问题不能为空"}), 400
+
+    try:
+        from rag import RAGFlowAdapter, check_ragflow_available
+
+        if not check_ragflow_available():
+            return jsonify({"error": "RAGFlow 服务未就绪"}), 503
+
+        adapter = RAGFlowAdapter()
+        chunks = adapter.retrieve(stock_code, question, top_k=top_k)
+
+        results = []
+        for chunk in chunks:
+            results.append({
+                "content": getattr(chunk, "content", str(chunk))[:800],
+                "doc_name": getattr(chunk, "document_name", ""),
+                "score": getattr(chunk, "similarity", None),
+            })
+
+        return jsonify({
+            "stock_code": stock_code,
+            "question": question,
+            "count": len(results),
+            "chunks": results,
+        })
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+
+
 if __name__ == "__main__":
     print("[WebServer] 启动股票公告分析服务...")
     print("[WebServer] 访问 http://127.0.0.1:5000")

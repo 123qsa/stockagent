@@ -199,7 +199,9 @@ def main():
     # RAG 模块命令（可选，需部署 RAGFlow 服务）
     p_ragflow_sync = sub.add_parser("ragflow-sync", help="同步公告到 RAGFlow（需先部署服务）")
     p_ragflow_sync.add_argument("code", help="股票代码")
-    p_ragflow_sync.add_argument("--limit", type=int, default=10, help="同步最近 N 条，默认 10")
+    p_ragflow_sync.add_argument("--limit", type=int, default=10, help="同步最近 N 条，默认 10，设为 0 表示全部")
+    p_ragflow_sync.add_argument("--batch-size", type=int, default=10, help="每批上传数量，默认 10")
+    p_ragflow_sync.add_argument("--no-skip", action="store_true", help="不跳过已存在的文档（强制重新上传）")
     p_ragflow_sync.add_argument("--no-parse", action="store_true", help="只上传不触发解析")
 
     p_ragflow_query = sub.add_parser("ragflow-query", help="在 RAGFlow 中检索公告")
@@ -245,7 +247,14 @@ def main():
             print("[Main] RAGFlow 服务未就绪，请先部署: cd rag && docker compose -f docker-compose.ragflow.yml up -d")
             return
         adapter = RAGFlowAdapter()
-        adapter.sync_stock_announcements(args.code, limit=args.limit, auto_parse=not args.no_parse)
+        limit = None if args.limit == 0 else args.limit
+        adapter.sync_stock_announcements(
+            args.code,
+            limit=limit,
+            auto_parse=not args.no_parse,
+            batch_size=args.batch_size,
+            skip_existing=not args.no_skip,
+        )
     elif args.command == "ragflow-query":
         if not check_ragflow_available():
             print("[Main] RAGFlow 服务未就绪")

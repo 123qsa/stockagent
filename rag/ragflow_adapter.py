@@ -206,19 +206,29 @@ class RAGFlowAdapter:
         stock_code: str,
         limit: int = 10,
         auto_parse: bool = True,
+        batch_size: int = 10,
+        skip_existing: bool = True,
     ) -> Dict:
         """同步某只股票的最新公告到 RAGFlow
 
         从本地 SQLite 数据库读取已下载的公告，上传到 RAGFlow。
+        支持批量上传、进度显示、断点续传。
+
+        Args:
+            stock_code: 股票代码
+            limit: 最多同步多少条，None 表示全部
+            auto_parse: 上传后是否自动触发解析
+            batch_size: 每批上传的文档数量
+            skip_existing: 是否跳过知识库中已存在的同名文档
 
         Returns:
-            {"uploaded": int, "parsed": int, "errors": int}
+            {"uploaded": int, "skipped": int, "parsed": int, "errors": int, "doc_ids": [...]}
         """
         from database import get_db, Announcement
 
         db = get_db()
         try:
-            anns = (
+            query = (
                 db.query(Announcement)
                 .filter(
                     Announcement.stock_code == stock_code,
@@ -226,32 +236,125 @@ class RAGFlowAdapter:
                     Announcement.local_path.isnot(None),
                 )
                 .order_by(Announcement.announcement_time.desc())
-                .limit(limit)
-                .all()
             )
+            if limit is not None:
+                query = query.limit(limit)
+            anns = query.all()
 
-            results = {"uploaded": 0, "parsed": 0, "errors": 0, "doc_ids": []}
+            print(f"[RAGFlow] 准备同步 {stock_code}，共 {len(anns)} 条公告（limit={limit}）")
 
-            for ann in anns:
+            ds = self.get_or_create_dataset(stock_code)
+
+            # 获取知识库中已有文档列表（用于去重）
+            existing_names = set()
+            if skip_existing:
                 try:
-                    doc = self.upload_announcement(
-                        stock_code,
-                        ann.local_path,
-                        display_name=f"{ann.announcement_time.strftime('%Y%m%d')}_{ann.title[:50]}.pdf" if ann.announcement_time else ann.title,
-                    )
-                    results["uploaded"] += 1
-                    results["doc_ids"].append(doc.id)
+                    existing_docs = ds.list_documents(page_size=1000)
+                    existing_names = {d.name for d in existing_docs if hasattr(d, "name")}
+                    print(f"[RAGFlow] 知识库已有 {len(existing_names)} 个文档")
                 except Exception as e:
-                    print(f"[RAGFlow] 上传失败 {ann.announcement_id}: {e}")
-                    results["errors"] += 1
+                    print(f"[RAGFlow] 获取已有文档列表失败，跳过去重检查: {e}")
 
+            results = {"uploaded": 0, "skipped": 0, "parsed": 0, "errors": 0, "doc_ids": []}
+            batch = []
+            batch_meta = []  # 对应的 (announcement_id, display_name)
+
+            def _flush_batch():
+                """上传当前批次"""
+                nonlocal batch, batch_meta, results
+                if not batch:
+                    return
+                try:
+                    docs = ds.upload_documents(batch)
+                    if docs and len(docs) == len(batch):
+                        for i, doc in enumerate(docs):
+                            if hasattr(doc, "id"):
+                                results["uploaded"] += 1
+                                results["doc_ids"].append(doc.id)
+                                print(f"  ✓ {batch_meta[i][1][:60]}... (doc_id={doc.id})")
+                            else:
+                                results["errors"] += 1
+                                print(f"  ✗ {batch_meta[i][1][:60]}... (返回文档无ID)")
+                    else:
+                        # 批量上传部分失败，逐个重试
+                        for i, item in enumerate(batch):
+                            try:
+                                docs_retry = ds.upload_documents([item])
+                                if docs_retry and hasattr(docs_retry[0], "id"):
+                                    results["uploaded"] += 1
+                                    results["doc_ids"].append(docs_retry[0].id)
+                                    print(f"  ✓ {batch_meta[i][1][:60]}... (retry ok)")
+                                else:
+                                    results["errors"] += 1
+                                    print(f"  ✗ {batch_meta[i][1][:60]}... (retry failed)")
+                            except Exception as e2:
+                                results["errors"] += 1
+                                print(f"  ✗ {batch_meta[i][1][:60]}... (retry error: {e2})")
+                except Exception as e:
+                    print(f"[RAGFlow] 批量上传失败，尝试逐个上传: {e}")
+                    for i, item in enumerate(batch):
+                        try:
+                            docs_retry = ds.upload_documents([item])
+                            if docs_retry and hasattr(docs_retry[0], "id"):
+                                results["uploaded"] += 1
+                                results["doc_ids"].append(docs_retry[0].id)
+                                print(f"  ✓ {batch_meta[i][1][:60]}... (fallback ok)")
+                            else:
+                                results["errors"] += 1
+                                print(f"  ✗ {batch_meta[i][1][:60]}... (fallback failed)")
+                        except Exception as e2:
+                            results["errors"] += 1
+                            print(f"  ✗ {batch_meta[i][1][:60]}... (fallback error: {e2})")
+                batch = []
+                batch_meta = []
+
+            for idx, ann in enumerate(anns, 1):
+                display_name = (
+                    f"{ann.announcement_time.strftime('%Y%m%d')}_{ann.title[:80]}.pdf"
+                    if ann.announcement_time
+                    else f"{ann.announcement_id}_{ann.title[:80]}.pdf"
+                )
+
+                if display_name in existing_names:
+                    results["skipped"] += 1
+                    if idx % 10 == 0 or idx == len(anns):
+                        print(f"  [{idx}/{len(anns)}] 跳过已存在: {display_name[:60]}...")
+                    continue
+
+                if not os.path.exists(ann.local_path):
+                    print(f"  [{idx}/{len(anns)}] PDF 文件不存在，跳过: {ann.local_path}")
+                    results["errors"] += 1
+                    continue
+
+                try:
+                    with open(ann.local_path, "rb") as f:
+                        blob = f.read()
+                except Exception as e:
+                    print(f"  [{idx}/{len(anns)}] 读取失败: {e}")
+                    results["errors"] += 1
+                    continue
+
+                batch.append({"display_name": display_name, "blob": blob})
+                batch_meta.append((ann.announcement_id, display_name))
+
+                if len(batch) >= batch_size:
+                    print(f"  [{idx}/{len(anns)}] 上传批次 ({len(batch)} 个)...")
+                    _flush_batch()
+                elif idx == len(anns):
+                    print(f"  [{idx}/{len(anns)}] 上传最后一批 ({len(batch)} 个)...")
+                    _flush_batch()
+                elif idx % 10 == 0:
+                    print(f"  [{idx}/{len(anns)}] 处理中...")
+
+            # 自动触发解析
             if auto_parse and results["doc_ids"]:
+                print(f"[RAGFlow] 开始解析 {len(results['doc_ids'])} 个文档...")
                 parse_results = self.parse_documents(stock_code, results["doc_ids"])
                 results["parsed"] = sum(1 for _, s, _, _ in parse_results if s == "DONE")
 
             print(
                 f"[RAGFlow] 同步完成: 上传 {results['uploaded']}, "
-                f"解析成功 {results['parsed']}, 失败 {results['errors']}"
+                f"跳过 {results['skipped']}, 解析成功 {results['parsed']}, 失败 {results['errors']}"
             )
             return results
         finally:

@@ -1,0 +1,14 @@
+[server]
+ip_address = "0.0.0.0"
+port = 23817
+http_port = 23820
+
+[storage]
+data_dir = "/var/infinity"
+
+[log]
+log_dir = "/var/infinity/log"
+log_to_stdout = true
+
+[resource]
+cpu_limit = 0
