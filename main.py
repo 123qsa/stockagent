@@ -8,7 +8,6 @@ from services.stock_pool import StockPool
 from services.announcement import AnnouncementService
 from services.llm_analyzer import AnnouncementAnalyzer, ANALYSIS_TYPES
 from services.pdf_parser import PDFParserService
-from services.ragflow_adapter import RAGFlowAdapter, check_ragflow_available
 from scheduler.job import start_scheduler, stop_scheduler, trigger_once
 
 
@@ -196,21 +195,6 @@ def main():
     p_parse_all = sub.add_parser("parse-all", help="解析股票池所有股票的公告")
     p_parse_all.add_argument("--limit", type=int, default=5, help="每只解析最近 N 条，默认 5")
 
-    # RAGFlow 集成命令
-    p_ragflow_sync = sub.add_parser("ragflow-sync", help="同步公告到 RAGFlow（需先部署服务）")
-    p_ragflow_sync.add_argument("code", help="股票代码")
-    p_ragflow_sync.add_argument("--limit", type=int, default=10, help="同步最近 N 条，默认 10")
-    p_ragflow_sync.add_argument("--no-parse", action="store_true", help="只上传不触发解析")
-
-    p_ragflow_query = sub.add_parser("ragflow-query", help="在 RAGFlow 中检索公告")
-    p_ragflow_query.add_argument("code", help="股票代码")
-    p_ragflow_query.add_argument("question", help="检索问题，如'2024年净利润是多少'")
-    p_ragflow_query.add_argument("--top-k", type=int, default=5, help="返回结果数，默认 5")
-
-    p_ragflow_chat = sub.add_parser("ragflow-chat", help="通过 RAGFlow Chat 问答")
-    p_ragflow_chat.add_argument("code", help="股票代码")
-    p_ragflow_chat.add_argument("question", help="问题")
-
     args = parser.parse_args()
 
     if args.command == "init":
@@ -240,29 +224,6 @@ def main():
         parse_stock(args.code, args.limit, all=args.all)
     elif args.command == "parse-all":
         parse_all(args.limit)
-    elif args.command == "ragflow-sync":
-        if not check_ragflow_available():
-            print("[Main] RAGFlow 服务未就绪，请先部署: docker compose -f docker-compose.ragflow.yml up -d")
-            return
-        adapter = RAGFlowAdapter()
-        adapter.sync_stock_announcements(args.code, limit=args.limit, auto_parse=not args.no_parse)
-    elif args.command == "ragflow-query":
-        if not check_ragflow_available():
-            print("[Main] RAGFlow 服务未就绪")
-            return
-        adapter = RAGFlowAdapter()
-        chunks = adapter.retrieve(args.code, args.question, top_k=args.top_k)
-        print(f"\n[Main] 检索结果 ({len(chunks)} 条):")
-        for i, chunk in enumerate(chunks, 1):
-            print(f"\n--- 结果 {i} ---")
-            print(chunk.content[:500] if hasattr(chunk, "content") else str(chunk)[:500])
-    elif args.command == "ragflow-chat":
-        if not check_ragflow_available():
-            print("[Main] RAGFlow 服务未就绪")
-            return
-        adapter = RAGFlowAdapter()
-        answer = adapter.chat(args.code, args.question)
-        print(f"\n[Main] RAGFlow 回答:\n{answer}")
     else:
         parser.print_help()
 
